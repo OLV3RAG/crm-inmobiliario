@@ -3,9 +3,10 @@ const BASE_URL = '/api';
 
 export async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem('accessToken');
-  
+  const isForm = typeof FormData !== 'undefined' && options.body instanceof FormData;
+
   const headers: HeadersInit = {
-    'Content-Type': 'application/json',
+    ...(isForm ? {} : { 'Content-Type': 'application/json' }),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...options.headers,
   };
@@ -15,10 +16,10 @@ export async function apiRequest<T>(endpoint: string, options: RequestInit = {})
     headers,
   });
 
+  const json = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(`API Error: ${response.statusText}`);
+    throw new Error(json.error || `API Error: ${response.statusText}`);
   }
 
-  const json = await response.json();
   return json.data !== undefined ? json.data : json;
 }

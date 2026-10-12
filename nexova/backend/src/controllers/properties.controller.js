@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { Op } from 'sequelize';
 import { Property, Asesor, Business, User, UserRole } from '../models/index.js';
-import { applyPropertyScope } from '../middlewares/scopeFilter.js';
+import { applyPropertyScope, assertAsesorInAdminTeam } from '../middlewares/scopeFilter.js';
 import { generateId } from '../utils/uuid.js';
 import { isFacebookConfigured } from '../services/facebook.service.js';
 import { isInstagramPublishConfigured } from '../services/instagramPublish.service.js';
@@ -91,9 +91,32 @@ function normalizeLocation(state, municipality) {
 }
 
 const propertyIncludes = [
-  { model: Asesor, as: 'asesor', attributes: ['id', 'name', 'phone'], required: false },
+  { model: Asesor, as: 'asesor', attributes: ['id', 'name', 'phone', 'email'], required: false },
   { model: User, as: 'gerente', attributes: ['id', 'full_name', 'email'], required: false },
 ];
+
+function canEditProperty(req, property) {
+  const { role, businessId, asesorId } = req.user || {};
+  if (role === 'owner') return true;
+  if (role === 'admin') return property.business_id === businessId;
+  if (role === 'asesor') return Boolean(asesorId) && property.asesor_id === asesorId;
+  return false;
+}
+
+export async function requirePropertyEditor(req, res, next) {
+  try {
+    const where = applyPropertyScope({ id: req.params.id }, req);
+    const property = await Property.findOne({ where });
+    if (!property) return res.status(404).json({ error: 'Propiedad no encontrada' });
+    if (!canEditProperty(req, property)) {
+      return res.status(403).json({ error: 'Solo puedes editar tus propiedades' });
+    }
+    req.editableProperty = property;
+    next();
+  } catch (err) {
+    res.status(403).json({ error: err.message });
+  }
+}
 
 const PUBLIC_CATALOG_ATTRS = [
   'id',
@@ -242,8 +265,33 @@ export async function createProperty(req, res) {
     return res.status(400).json({ error: 'Tu usuario no tiene empresa asignada' });
   }
 
-  const gerenteId = await resolveGerenteId(req, businessId, admin_id);
-  if (gerenteId?.error) return res.status(400).json({ error: gerenteId.error });
+  let gerenteId;
+  let asesorId = null;
+  if (req.user.role === 'asesor') {
+    if (!req.user.asesorId) {
+      return res.status(400).json({ error: 'Tu usuario no tiene perfil de asesor' });
+    }
+    const asesor = await Asesor.findByPk(req.user.asesorId);
+    if (!asesor || asesor.business_id !== businessId) {
+      return res.status(400).json({ error: 'Tu perfil de asesor no pertenece a esta empresa' });
+    }
+    gerenteId = asesor.admin_id || null;
+    asesorId = asesor.id;
+  } else {
+    gerenteId = await resolveGerenteId(req, businessId, admin_id);
+    if (gerenteId?.error) return res.status(400).json({ error: gerenteId.error });
+    if (req.body.asesor_id) {
+      const asesor = await Asesor.findOne({
+        where: { id: req.body.asesor_id, business_id: businessId },
+      });
+      if (!asesor) return res.status(400).json({ error: 'Asesor no válido' });
+      if (req.user.role === 'admin') {
+        const allowed = await assertAsesorInAdminTeam(req, asesor.id);
+        if (!allowed) return res.status(400).json({ error: 'Solo puedes asignar asesores de tu equipo' });
+      }
+      asesorId = asesor.id;
+    }
+  }
 
   const location = normalizeLocation(state || zone, municipality);
   if (location.error) return res.status(400).json({ error: location.error });
@@ -275,16 +323,20 @@ export async function createProperty(req, res) {
     description: description?.trim() || null,
     images: parsedImages,
     status: STATUSES.includes(status) ? status : 'disponible',
-    asesor_id: null,
+    asesor_id: asesorId,
   });
 
-  res.status(201).json({ data: property });
+  const fresh = await Property.findOne({ where: { id: property.id }, include: propertyIncludes });
+  res.status(201).json({ data: fresh });
 }
 
 export async function updateProperty(req, res) {
   const where = applyPropertyScope({ id: req.params.id }, req);
   const property = await Property.findOne({ where });
   if (!property) return res.status(404).json({ error: 'Propiedad no encontrada' });
+  if (!canEditProperty(req, property)) {
+    return res.status(403).json({ error: 'Solo puedes editar tus propiedades' });
+  }
 
   const {
     title,
@@ -366,11 +418,11 @@ export async function updateProperty(req, res) {
     description: description !== undefined ? (description?.trim() || null) : property.description,
     images: parsedImages !== undefined ? parsedImages : property.images,
     status: status ?? property.status,
-    asesor_id: null,
     admin_id: gerenteId,
   });
 
-  res.json({ data: property });
+  const fresh = await Property.findOne({ where: { id: property.id }, include: propertyIncludes });
+  res.json({ data: fresh });
 }
 
 const PROPERTY_PHOTO_MIME = {
@@ -405,8 +457,7 @@ export function getPublicPropertyPhoto(req, res) {
 }
 
 export async function uploadPropertyPhotos(req, res) {
-  const where = applyPropertyScope({ id: req.params.id }, req);
-  const property = await Property.findOne({ where });
+  const property = req.editableProperty;
   if (!property) return res.status(404).json({ error: 'Propiedad no encontrada' });
 
   const files = req.files || [];
@@ -419,14 +470,12 @@ export async function uploadPropertyPhotos(req, res) {
 
   const existing = parsePropertyImages(property.images);
   await property.update({ images: [...existing, ...uploaded] });
-  await property.reload();
-
-  res.json({ data: property });
+  const fresh = await Property.findOne({ where: { id: property.id }, include: propertyIncludes });
+  res.json({ data: fresh });
 }
 
 export async function deletePropertyPhoto(req, res) {
-  const where = applyPropertyScope({ id: req.params.id }, req);
-  const property = await Property.findOne({ where });
+  const property = req.editableProperty;
   if (!property) return res.status(404).json({ error: 'Propiedad no encontrada' });
 
   const { url } = req.body;
@@ -435,6 +484,7 @@ export async function deletePropertyPhoto(req, res) {
   const existing = parsePropertyImages(property.images);
   const next = existing.filter((img) => img.url !== url);
   await property.update({ images: next.length ? next : null });
+  const fresh = await Property.findOne({ where: { id: property.id }, include: propertyIncludes });
 
   if (url.startsWith('/uploads/properties/')) {
     const filePath = path.join(process.cwd(), url.replace(/^\//, '').replace(/\//g, path.sep));
@@ -443,7 +493,7 @@ export async function deletePropertyPhoto(req, res) {
     }
   }
 
-  res.json({ data: property });
+  res.json({ data: fresh });
 }
 
 export async function deleteProperty(req, res) {

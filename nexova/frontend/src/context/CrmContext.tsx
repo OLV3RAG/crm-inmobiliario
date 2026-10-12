@@ -31,6 +31,7 @@ interface CrmContextType {
   isLoading: boolean;
   addContact: (contact: Omit<Contact, 'id' | 'createdAt' | 'assignedAdvisorId' | 'assignedAdvisorEmail' | 'assignedTo'>) => void;
   updatePropertySync: (id: string) => void;
+  applyProperty: (property: Property) => void;
   updateOpportunityStage: (id: string, stage: PipelineStage) => void;
   addQuote: (quote: Omit<Quote, 'id' | 'date' | 'status' | 'assignedAdvisorId' | 'assignedAdvisorEmail'>) => void;
 }
@@ -207,6 +208,21 @@ export function CrmProvider({ children }: { children: ReactNode }) {
     addAuditLog('Creó prospecto', 'Contactos', `Registró al contacto "${contactData.name}" para ${assignedUser.name}`);
   }, [currentUser, selectedAdvisorFilter, addAuditLog]);
 
+  const applyProperty = useCallback((property: Property) => {
+    setProperties((prev) => {
+      const index = prev.findIndex((item) => item.id === property.id);
+      if (index === -1) return [property, ...prev];
+      const next = [...prev];
+      next[index] = {
+        ...prev[index],
+        ...property,
+        assignedAdvisorId: property.assignedAdvisorId || prev[index].assignedAdvisorId,
+        assignedAdvisorEmail: property.assignedAdvisorEmail || prev[index].assignedAdvisorEmail,
+      };
+      return next;
+    });
+  }, []);
+
   const updatePropertySync = useCallback((id: string) => {
     setProperties(prev => prev.map(p => {
       if (p.id === id) {
@@ -264,6 +280,7 @@ export function CrmProvider({ children }: { children: ReactNode }) {
       isLoading,
       addContact,
       updatePropertySync,
+      applyProperty,
       updateOpportunityStage,
       addQuote
     }}>

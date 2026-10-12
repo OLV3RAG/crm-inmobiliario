@@ -65,6 +65,7 @@ const mapJwtToUser = (payload: JwtPayload): UserCredential => {
     password: '', // Jamás almacenar la contraseña en estado de sesión
     role: mappedRole,
     phone: registryUser ? registryUser.phone : 'S/N',
+    asesorId: payload.asesorId || null,
   };
 };
 

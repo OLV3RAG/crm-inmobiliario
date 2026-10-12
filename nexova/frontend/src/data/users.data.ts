@@ -9,6 +9,7 @@ export interface UserCredential {
   password: string; // En un entorno real esto estaría hasheado
   role: UserRole;
   phone: string;
+  asesorId?: string | null;
 }
 
 export const USERS_REGISTRY: UserCredential[] = [

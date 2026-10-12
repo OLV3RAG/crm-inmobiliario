@@ -36,6 +36,7 @@ function categoryOf(type?: string): PropertyCategory {
 function propertyStatusOf(status?: string): PropertyStatus {
   if (status === 'reservada') return 'Apartada';
   if (status === 'vendida') return 'Vendida';
+  if (status === 'pausada') return 'Pausada';
   return 'Disponible';
 }
 
@@ -75,6 +76,14 @@ export function mapProperty(row: any): Property {
     latitude: row.latitude != null ? num(row.latitude) : undefined,
     longitude: row.longitude != null ? num(row.longitude) : undefined,
     imageUrl: typeof images[0] === 'string' ? images[0] : images[0]?.url,
+    images: images.map((item: any) => (typeof item === 'string' ? item : item?.url)).filter(Boolean),
+    address: row.address || '',
+    city: row.city || '',
+    state: row.state || row.zone || '',
+    municipality: row.municipality || '',
+    description: row.description || '',
+    propertyType: row.property_type || 'casa',
+    rawStatus: row.status || 'disponible',
   };
 }
 
@@ -246,6 +255,21 @@ export const crmApi = {
     method: 'PATCH',
     body: JSON.stringify({ status }),
   }),
+  updateProperty: (propertyId: string, body: Record<string, unknown>) => apiRequest<any>(`/properties/${propertyId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  }),
+  createProperty: (body: Record<string, unknown>) => apiRequest<any>('/properties', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  }),
+  uploadPropertyPhotos: (propertyId: string, files: File[]) => {
+    const form = new FormData();
+    files.forEach((file) => form.append('photos', file));
+    return apiRequest<any>(`/properties/${propertyId}/photos`, { method: 'POST', body: form });
+  },
+  getBusinessOptions: () => apiRequest<any[]>('/asesores/business-options'),
+  getGerentes: (businessId: string) => apiRequest<any[]>(`/gerentes?business_id=${encodeURIComponent(businessId)}`),
   getConversations: () => safeList('/conversations', mapConversation),
   getMessages: async (conversationId: string) => {
     const data = await apiRequest<any>(`/conversations/${conversationId}/messages`);

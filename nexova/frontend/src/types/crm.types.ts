@@ -5,7 +5,7 @@ export type RoleType = 'Admin' | 'Coordinador' | 'Asesor Senior' | 'Asesor Junio
 // Properties
 export type PropertyOperation = 'Venta' | 'Renta';
 export type PropertyCategory = 'Casa' | 'Departamento' | 'Terreno' | 'Comercial';
-export type PropertyStatus = 'Disponible' | 'Apartada' | 'Vendida' | 'Rentada';
+export type PropertyStatus = 'Disponible' | 'Apartada' | 'Vendida' | 'Rentada' | 'Pausada';
 
 export interface Property {
   id: string;
@@ -27,6 +27,14 @@ export interface Property {
   longitude?: number;
   imageUrl?: string;
   assignedAdvisorEmail: string;
+  address: string;
+  city: string;
+  state: string;
+  municipality: string;
+  description: string;
+  propertyType: string;
+  rawStatus: string;
+  images: string[];
 }
 
 // Contacts (Leads)
